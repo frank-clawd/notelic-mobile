@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,20 +7,11 @@ import {
   TextInput,
   FlatList,
   LayoutAnimation,
+  Animated,
+  PanResponder,
   Platform,
   UIManager,
 } from 'react-native';
-import {
-  Gesture,
-  GestureDetector,
-  GestureHandlerRootView,
-} from 'react-native-gesture-handler';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-  runOnJS,
-} from 'react-native-reanimated';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -37,7 +28,7 @@ interface ChecklistViewProps {
   onItemsChange: (items: ChecklistItem[]) => void;
 }
 
-const ITEM_HEIGHT = 50; // approximate row height for drag calculations
+const ITEM_HEIGHT = 50;
 
 function DraggableItem({
   item,
@@ -54,97 +45,109 @@ function DraggableItem({
   updateText: (id: string, text: string) => void;
   onReorder: (from: number, to: number) => void;
 }) {
-  const translateY = useSharedValue(0);
-  const isDragging = useSharedValue(false);
-  const startIndex = useSharedValue(index);
-  const currentIndex = useSharedValue(index);
+  const translateY = useRef(new Animated.Value(0)).current;
+  const [dragging, setDragging] = useState(false);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isDraggingRef = useRef(false);
+  const startIndexRef = useRef(index);
 
-  // Update index when items change
-  startIndex.value = index;
-  currentIndex.value = index;
+  // Keep index in sync
+  startIndexRef.current = index;
 
-  const longPressDrag = Gesture.LongPress()
-    .minDuration(300)
-    .onStart(() => {
-      isDragging.value = true;
-      startIndex.value = index;
-      currentIndex.value = index;
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: () => isDraggingRef.current,
+      onPanResponderMove: (_, gestureState) => {
+        if (!isDraggingRef.current) return;
+        translateY.setValue(gestureState.dy);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (!isDraggingRef.current) return;
+        isDraggingRef.current = false;
+        setDragging(false);
+
+        const from = startIndexRef.current;
+        const diff = Math.round(gestureState.dy / ITEM_HEIGHT);
+        const to = Math.max(0, Math.min(totalCount - 1, from + diff));
+
+        Animated.spring(translateY, {
+          toValue: 0,
+          useNativeDriver: false,
+        }).start(() => {
+          if (from !== to) {
+            onReorder(from, to);
+          }
+        });
+      },
+      onPanResponderTerminate: () => {
+        isDraggingRef.current = false;
+        setDragging(false);
+        Animated.spring(translateY, {
+          toValue: 0,
+          useNativeDriver: false,
+        }).start();
+      },
     })
-    .onFinalize(() => {
-      if (isDragging.value) {
-        isDragging.value = false;
-        const from = startIndex.value;
-        const to = currentIndex.value;
-        if (from !== to) {
-          runOnJS(onReorder)(from, to);
-        }
-        translateY.value = withTiming(0);
-      }
-    });
+  ).current;
 
-  const pan = Gesture.Pan()
-    .enabled(false) // controlled by simultaneous
-    .onUpdate((e) => {
-      if (!isDragging.value) return;
-      translateY.value = e.translationY;
-      // Calculate target index
-      const diff = e.translationY / ITEM_HEIGHT;
-      const newIndex = Math.round(Math.max(0, Math.min(totalCount - 1, startIndex.value + diff)));
-      currentIndex.value = newIndex;
-    })
-    .onFinalize(() => {
-      if (isDragging.value) {
-        isDragging.value = false;
-        const from = startIndex.value;
-        const to = currentIndex.value;
-        if (from !== to) {
-          runOnJS(onReorder)(from, to);
-        }
-        translateY.value = withTiming(0);
-      }
-    });
+  const handlePressIn = () => {
+    longPressTimer.current = setTimeout(() => {
+      isDraggingRef.current = true;
+      startIndexRef.current = index;
+      setDragging(true);
+    }, 300);
+  };
 
-  const composed = Gesture.Simultaneous(longPressDrag, pan);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }],
-    elevation: isDragging.value ? 5 : 0,
-    zIndex: isDragging.value ? 999 : 1,
-    opacity: withTiming(isDragging.value ? 0.9 : 1, { duration: 150 }),
-  }));
+  const handlePressOut = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
 
   return (
-    <GestureDetector gesture={composed}>
-      <Animated.View style={animatedStyle}>
-        <View style={styles.itemRow}>
-          <TouchableOpacity
-            style={styles.checkbox}
-            onPress={() => toggleItem(item.id)}
-            activeOpacity={0.7}
+    <Animated.View
+      style={{
+        transform: [{ translateY }],
+        elevation: dragging ? 5 : 0,
+        zIndex: dragging ? 999 : 1,
+        opacity: dragging ? 0.9 : 1,
+      }}
+      {...panResponder.panHandlers}
+    >
+      <View style={styles.itemRow}>
+        <TouchableOpacity
+          style={styles.checkbox}
+          onPress={() => toggleItem(item.id)}
+          activeOpacity={0.7}
+        >
+          <View
+            style={[
+              styles.checkboxBox,
+              item.checked && styles.checkboxChecked,
+            ]}
           >
-            <View
-              style={[
-                styles.checkboxBox,
-                item.checked && styles.checkboxChecked,
-              ]}
-            >
-              {item.checked && <Text style={styles.checkmark}>✓</Text>}
-            </View>
-          </TouchableOpacity>
-          <TextInput
-            style={[styles.itemText, item.checked && styles.itemTextChecked]}
-            value={item.text}
-            onChangeText={(text) => updateText(item.id, text)}
-            placeholder="List item..."
-            placeholderTextColor="#aaa"
-            multiline
-          />
-          <View style={styles.dragHandle}>
-            <Text style={styles.dragHandleText}>≡</Text>
+            {item.checked && <Text style={styles.checkmark}>✓</Text>}
           </View>
-        </View>
-      </Animated.View>
-    </GestureDetector>
+        </TouchableOpacity>
+        <TextInput
+          style={[styles.itemText, item.checked && styles.itemTextChecked]}
+          value={item.text}
+          onChangeText={(text) => updateText(item.id, text)}
+          placeholder="List item..."
+          placeholderTextColor="#aaa"
+          multiline
+        />
+        <TouchableOpacity
+          style={styles.dragHandle}
+          onPressIn={handlePressIn}
+          onPressOut={handlePressOut}
+          activeOpacity={0.5}
+        >
+          <Text style={styles.dragHandleText}>≡</Text>
+        </TouchableOpacity>
+      </View>
+    </Animated.View>
   );
 }
 
@@ -207,7 +210,7 @@ export default function ChecklistView({
   );
 
   return (
-    <GestureHandlerRootView style={styles.container}>
+    <View style={styles.container}>
       <FlatList
         data={items}
         renderItem={renderItem}
@@ -218,7 +221,7 @@ export default function ChecklistView({
       <TouchableOpacity style={styles.addButton} onPress={addItem}>
         <Text style={styles.addButtonText}>+ Add item</Text>
       </TouchableOpacity>
-    </GestureHandlerRootView>
+    </View>
   );
 }
 
