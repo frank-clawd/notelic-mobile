@@ -1,0 +1,38 @@
+const colors = {
+  light: {
+    text: '#1a1a1a',
+    secondaryText: '#6b6b6b',
+    background: '#f7f7f7',
+    surface: '#ffffff',
+    card: '#ffffff',
+    border: '#e5e5e5',
+    tint: '#007AFF',
+    error: '#FF3B30',
+    success: '#34C759',
+    tabIconDefault: '#8e8e93',
+    tabIconSelected: '#007AFF',
+    inputBackground: '#f0f0f0',
+    shadow: 'rgba(0, 0, 0, 0.06)',
+    tagBackground: '#f0f0f5',
+    tagText: '#555566',
+  },
+  dark: {
+    text: '#f5f5f5',
+    secondaryText: '#a0a0a0',
+    background: '#000000',
+    surface: '#1c1c1e',
+    card: '#1c1c1e',
+    border: '#2c2c2e',
+    tint: '#0A84FF',
+    error: '#FF453A',
+    success: '#30D158',
+    tabIconDefault: '#636366',
+    tabIconSelected: '#0A84FF',
+    inputBackground: '#2c2c2e',
+    shadow: 'rgba(0, 0, 0, 0.3)',
+    tagBackground: '#2c2c2e',
+    tagText: '#a0a0b0',
+  },
+};
+
+export default colors;
