@@ -33,7 +33,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         set({ pendingTotpToken: res.totpToken, isLoading: false });
         return;
       }
-      await SecureStore.setItemAsync(SESSION_KEY, 'true');
+      if (res.token) await SecureStore.setItemAsync(SESSION_KEY, res.token);
       set({
         user: {
           id: res.user.id,
@@ -56,7 +56,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isLoading: true });
     try {
       const res = await authApi.verifyTotp(pendingTotpToken, code);
-      await SecureStore.setItemAsync(SESSION_KEY, 'true');
+      if (res.token) await SecureStore.setItemAsync(SESSION_KEY, res.token);
       set({
         user: {
           id: res.user.id,

@@ -1,6 +1,7 @@
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import { makeRedirectUri } from 'expo-auth-session';
+import * as SecureStore from 'expo-secure-store';
 import { useEffect } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -32,10 +33,18 @@ export function useGoogleAuth() {
 
 async function exchangeGoogleToken(accessToken: string) {
   try {
+    const existingToken = await SecureStore.getItemAsync('notelic_session_active');
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (existingToken && existingToken !== 'true') {
+      headers['X-Session-Token'] = existingToken;
+    }
+
     // Send Google access token to our server to create a session
     const res = await fetch('https://notelic.com/auth/google/mobile', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       credentials: 'include',
       body: JSON.stringify({ accessToken }),
     });
@@ -46,8 +55,7 @@ async function exchangeGoogleToken(accessToken: string) {
     }
 
     const data = await res.json();
-    const SecureStore = require('expo-secure-store');
-    await SecureStore.setItemAsync('notelic_session_active', 'true');
+    if (data.token) await SecureStore.setItemAsync('notelic_session_active', data.token);
     useAuthStore.setState({
       user: {
         id: data.user.id,

@@ -1,3 +1,4 @@
+import * as SecureStore from 'expo-secure-store';
 import { API_BASE_URL } from '@/constants/config';
 
 export class ApiError extends Error {
@@ -8,19 +9,27 @@ export class ApiError extends Error {
   }
 }
 
+const SESSION_KEY = 'notelic_session_active';
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  const token = await SecureStore.getItemAsync(SESSION_KEY);
+  
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   };
+  
+  if (token && token !== 'true') {
+    headers['X-Session-Token'] = token;
+  }
 
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
-    credentials: 'include', // Send/receive cookies for session auth
+    credentials: 'include', // Send/receive cookies for session auth (fallback)
   });
 
   if (!res.ok) {
