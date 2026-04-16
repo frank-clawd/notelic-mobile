@@ -1,48 +1,73 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import { authApi } from '@/api/auth';
-import type { User, TokenPair } from '@/api/types';
+import type { User } from '@/api/types';
 
 interface AuthState {
   user: User | null;
-  tokenPair: TokenPair | null;
   isLoading: boolean;
   isInitialized: boolean;
+  pendingTotpToken: string | null;
 
   login: (email: string, password: string) => Promise<void>;
+  verifyTotp: (code: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
   logout: () => Promise<void>;
   restoreSession: () => Promise<void>;
   setUser: (user: User) => void;
 }
 
-const TOKEN_KEY = 'notelic_auth_token';
-
-// Non-reactive token access for API client
-let _currentToken: TokenPair | null = null;
-export function getToken() {
-  return _currentToken;
-}
-export function setToken(pair: TokenPair) {
-  _currentToken = pair;
-}
-export function clearToken() {
-  _currentToken = null;
-}
+const SESSION_KEY = 'notelic_session_active';
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
-  tokenPair: null,
   isLoading: false,
   isInitialized: false,
+  pendingTotpToken: null,
 
   login: async (email: string, password: string) => {
     set({ isLoading: true });
     try {
       const res = await authApi.login(email, password);
-      _currentToken = { token: res.token, refreshToken: res.refreshToken };
-      await SecureStore.setItemAsync(TOKEN_KEY, JSON.stringify(_currentToken));
-      set({ user: res.user, tokenPair: _currentToken, isLoading: false });
+      if (res.requiresTOTP && res.totpToken) {
+        set({ pendingTotpToken: res.totpToken, isLoading: false });
+        return;
+      }
+      await SecureStore.setItemAsync(SESSION_KEY, 'true');
+      set({
+        user: {
+          id: res.user.id,
+          email: res.user.email,
+          name: res.user.displayName,
+          plan: 'free',
+          createdAt: new Date().toISOString(),
+        },
+        isLoading: false,
+      });
+    } catch (error) {
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  verifyTotp: async (code: string) => {
+    const { pendingTotpToken } = get();
+    if (!pendingTotpToken) throw new Error('No pending TOTP session');
+    set({ isLoading: true });
+    try {
+      const res = await authApi.verifyTotp(pendingTotpToken, code);
+      await SecureStore.setItemAsync(SESSION_KEY, 'true');
+      set({
+        user: {
+          id: res.user.id,
+          email: res.user.email,
+          name: res.user.displayName,
+          plan: 'free',
+          createdAt: new Date().toISOString(),
+        },
+        pendingTotpToken: null,
+        isLoading: false,
+      });
     } catch (error) {
       set({ isLoading: false });
       throw error;
@@ -53,9 +78,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isLoading: true });
     try {
       const res = await authApi.register(email, password, name);
-      _currentToken = { token: res.token, refreshToken: res.refreshToken };
-      await SecureStore.setItemAsync(TOKEN_KEY, JSON.stringify(_currentToken));
-      set({ user: res.user, tokenPair: _currentToken, isLoading: false });
+      await SecureStore.setItemAsync(SESSION_KEY, 'true');
+      set({
+        user: {
+          id: res.user.id,
+          email: res.user.email,
+          name: res.user.displayName,
+          plan: 'free',
+          createdAt: new Date().toISOString(),
+        },
+        isLoading: false,
+      });
     } catch (error) {
       set({ isLoading: false });
       throw error;
@@ -63,33 +96,33 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
-    _currentToken = null;
-    await SecureStore.deleteItemAsync(TOKEN_KEY);
-    set({ user: null, tokenPair: null });
+    await SecureStore.deleteItemAsync(SESSION_KEY);
+    set({ user: null });
   },
 
   restoreSession: async () => {
     try {
-      const stored = await SecureStore.getItemAsync(TOKEN_KEY);
-      if (!stored) {
+      const hasSession = await SecureStore.getItemAsync(SESSION_KEY);
+      if (!hasSession) {
         set({ isInitialized: true });
         return;
       }
-      const pair: TokenPair = JSON.parse(stored);
-      _currentToken = pair;
-      set({ tokenPair: pair });
-      // Validate token by fetching profile
-      try {
-        const user = await authApi.getProfile();
-        set({ user, isInitialized: true });
-      } catch {
-        // Token invalid — clear it
-        _currentToken = null;
-        await SecureStore.deleteItemAsync(TOKEN_KEY);
-        set({ tokenPair: null, user: null, isInitialized: true });
-      }
+      // Validate session by fetching profile
+      const profile = await authApi.getProfile();
+      set({
+        user: {
+          id: profile.user.id,
+          email: profile.user.email,
+          name: profile.user.displayName,
+          plan: profile.user.plan || 'free',
+          createdAt: new Date().toISOString(),
+        },
+        isInitialized: true,
+      });
     } catch {
-      set({ isInitialized: true });
+      // Session invalid
+      await SecureStore.deleteItemAsync(SESSION_KEY);
+      set({ user: null, isInitialized: true });
     }
   },
 
