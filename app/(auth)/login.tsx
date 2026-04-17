@@ -42,6 +42,9 @@ export default function LoginScreen() {
     try {
       setError('');
       await login(email, password);
+      if (!useAuthStore.getState().pendingTotpToken) {
+        router.replace('/');
+      }
     } catch (err: any) {
       setError(err.message || 'Login failed');
     }
@@ -55,6 +58,9 @@ export default function LoginScreen() {
     try {
       setError('');
       await verifyTotp(totpCode);
+      // Force navigation — the auth gate should handle this,
+      // but explicitly redirect as a safety net
+      router.replace('/');
     } catch (err: any) {
       setError(err.message || 'Invalid code');
       setTotpCode('');
